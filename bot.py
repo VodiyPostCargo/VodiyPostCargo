@@ -1,12 +1,8 @@
 from aiogram import Bot, Dispatcher, executor, types
-from config import BOT_TOKEN, ADMINS, PAYME_MERCHANT_ID, PAYME_SECRET_KEY, PAYME_CALLBACK_URL
+from config import BOT_TOKEN, ADMINS, PAYME_MERCHANT_ID, PAYME_CALLBACK_URL
 from keyboards import user_menu, admin_menu, track_manage_keyboard
 import sqlite3
-import requests
 import uuid
-import hmac
-import hashlib
-import json
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -19,14 +15,12 @@ cursor = db.cursor()
 async def start(msg: types.Message):
     cursor.execute("INSERT OR IGNORE INTO users (tg_id) VALUES (?)", (msg.from_user.id,))
     db.commit()
-    
     if msg.from_user.id in ADMINS:
         await msg.answer("👮 Admin menyu", reply_markup=admin_menu)
     else:
         await msg.answer("📦 Cargo botga xush kelibsiz!", reply_markup=user_menu)
 
 # --- FOYDALANUVCHI FUNKSIYALARI ---
-
 @dp.message_handler(text="➕ Trek qo‘shish")
 async def add_track(msg: types.Message):
     await msg.answer("✍️ Trek raqamni yuboring:")
@@ -35,7 +29,6 @@ async def add_track(msg: types.Message):
 async def save_track(msg: types.Message):
     cursor.execute("SELECT id FROM users WHERE tg_id=?", (msg.from_user.id,))
     user_id = cursor.fetchone()[0]
-    
     cursor.execute("INSERT INTO tracks (user_id, track_code) VALUES (?,?)", (user_id, msg.text))
     db.commit()
     await msg.answer("✅ Trek qo‘shildi")
@@ -48,11 +41,9 @@ async def my_tracks(msg: types.Message):
     WHERE users.tg_id=?
     """, (msg.from_user.id,))
     rows = cursor.fetchall()
-    
     if not rows:
         await msg.answer("📭 Treklar yo‘q")
         return
-    
     text = ""
     for t in rows:
         text += f"""
@@ -79,20 +70,10 @@ async def mark_paid(msg: types.Message):
         return
     price = res[0]
     invoice_id = str(uuid.uuid4())
-    data = {
-        "amount": price,
-        "account": msg.text,
-        "merchant_id": PAYME_MERCHANT_ID,
-        "merchant_key": PAYME_SECRET_KEY,
-        "callback_url": PAYME_CALLBACK_URL,
-        "invoice_id": invoice_id
-    }
-    # HMAC signature
-    sign = hmac.new(PAYME_SECRET_KEY.encode(), msg.text.encode(), hashlib.sha256).hexdigest()
-    payment_url = f"https://checkout.payme.uz?invoice={invoice_id}&signature={sign}"
+    payment_url = f"https://checkout.payme.uz?account={msg.text}&amount={price}&merchant_id={PAYME_MERCHANT_ID}&callback_url={PAYME_CALLBACK_URL}&invoice_id={invoice_id}"
     await msg.answer(f"💳 To‘lov uchun link:\n{payment_url}")
 
-# 📍 Olib ketish punkti
+# 📍 Olib ketish
 @dp.message_handler(text="📍 Olib ketish")
 async def pickup(msg: types.Message):
     await msg.answer("Olib ketish punktini tanlang (Pochta / Punkt):")
@@ -115,7 +96,6 @@ async def all_tracks(msg: types.Message):
         return
     cursor.execute("SELECT track_code, status, price, weight, paid, pickup_point FROM tracks")
     rows = cursor.fetchall()
-    
     text = ""
     for t in rows:
         text += f"""
@@ -137,7 +117,7 @@ async def manage_tracks(msg: types.Message):
     for t in rows:
         await msg.answer(f"📦 {t[0]}", reply_markup=track_manage_keyboard(t[0]))
 
-# Inline tugmalar uchun callback
+# Inline tugmalar callback
 @dp.callback_query_handler(lambda c: True)
 async def process_callback(call):
     data = call.data.split("_")
@@ -151,7 +131,6 @@ async def process_callback(call):
         cursor.execute("UPDATE tracks SET status=? WHERE track_code=?", (statuses[new_index], track_code))
         db.commit()
         await call.message.edit_text(f"📦 {track_code}\nHolat: {statuses[new_index]}", reply_markup=track_manage_keyboard(track_code))
-
     elif action == "paid":
         cursor.execute("SELECT paid FROM tracks WHERE track_code=?", (track_code,))
         current = cursor.fetchone()[0]
@@ -159,7 +138,6 @@ async def process_callback(call):
         cursor.execute("UPDATE tracks SET paid=? WHERE track_code=?", (new, track_code))
         db.commit()
         await call.message.edit_text(f"📦 {track_code}\nTo‘lov: {'✅' if new else '❌'}", reply_markup=track_manage_keyboard(track_code))
-
     elif action == "pickup":
         cursor.execute("SELECT pickup_point FROM tracks WHERE track_code=?", (track_code,))
         current = cursor.fetchone()[0]
@@ -170,7 +148,7 @@ async def process_callback(call):
     
     await call.answer()
 
-# Trek qidirish
+# 🔍 Trek qidirish
 @dp.message_handler(text="🔍 Trek qidirish")
 async def search_track(msg: types.Message):
     await msg.answer("Qidiriladigan trek raqamini kiriting:")
